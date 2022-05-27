@@ -1,0 +1,1360 @@
+---
+title: "Cluster Analysis League of Legends Champions"
+author: "Billy Houseman"
+date: "27/05/2022"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    theme: cerulean
+---
+<style>
+blockquote {
+    padding: 10px 20px;
+    margin: 0 0 20px;
+    font-size: 13.5px;
+    border-left: 5px solid #eee;
+}
+
+body {
+text-align: justify;
+font-size: 14pt;
+}
+
+body .main-container {
+max-width: 3600px;
+}
+
+.html-widget {
+    margin: auto;
+}
+</style>
+---
+
+
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+
+# loading libraries
+library(jsonlite)
+library(tidyverse)
+library(rvest)
+library(factoextra)
+library(cluster)
+library(caret)
+library(fields)
+library(FactoMineR)
+library(ggpubr)
+library(knitr)
+library(DT)
+library(gridExtra)
+library(colorspace)
+library(dendextend)
+library(corrplot)
+
+# set working directory
+setwd("~/r projs/LOL")
+
+# data
+example_distance <- read.csv("example_distance.csv", header = T, row.names = c("Controller", "Fighter", "Mage", "Marksman", "Slayer", "Specialist", "Tank"))
+
+base_data <- read.csv("Champion Data.csv", header = T)
+
+ratings <- read.csv("ratings_df.csv", header = T)
+
+class <- read.csv("class.csv", header = T)
+
+data_2021_oe <- read.csv("LOL Data.csv", header = T)
+
+data_2022_oe <- read.csv("LOL Data 2022.csv", header = T)
+
+data_2022_e <- read.csv("df_v5_features.csv", header = T)
+
+variable_desc <- read.csv("Cluster_OE_variables_desc.csv", header = T)
+
+custom_desc <- read.csv("custom_descriptions.csv", header = T)
+
+
+
+
+# set seed
+set.seed(123)
+
+
+```
+
+
+
+# 1. Introduction
+
+## 1.1 Background
+League of Legends is a multiplayer online battle arena game developed by Riot Games. In its simplest description, 10 players of 2 teams (5v5) fight to destroy the opposing base (nexus), the first team to do so wins the match. Each of the 10 players choose from over 150 playable characters (referred to as champions). Each champion has unique abilities, stats, and playstyles. 
+
+The developers of the game (Riot) have grouped each character into 1 of 7 classes. Classes are groups of champions with similar playstyles. Within most of these classes there are subclasses, further subdivisions of the main classes. These will not be considered for this analysis.
+
+These classes are defined as ([taken from official riot sources]( https://lol.garena.com/news/articles/654)):
+
+![](https://static.wikia.nocookie.net/leagueoflegends/images/2/28/Slayer_icon.png/revision/latest/scale-to-width-down/96?cb=20181117143556) __Slayer__
+
+>*Slayers are fragile but agile mixed damage-focused melee champions that look to swiftly take down their targets with high mobility.* 
+
+![](https://static.wikia.nocookie.net/leagueoflegends/images/8/8f/Fighter_icon.png/revision/latest/scale-to-width-down/96?cb=20181117143554) __Fighter__
+
+>*Fighters are short-ranged physical damage dealers who excel at both dealing and surviving damage.*
+
+![](https://static.wikia.nocookie.net/leagueoflegends/images/2/28/Mage_icon.png/revision/latest/scale-to-width-down/96?cb=20181117143555) __Mage__
+
+>*Mages specialise in magic damage, typically possessing great range and ability-based damage and crowd control.*
+
+![](https://static.wikia.nocookie.net/leagueoflegends/images/7/7f/Marksman_icon.png/revision/latest/scale-to-width-down/96?cb=20181117143555) __Marksman__
+
+>*Marksman excel at dealing reliable sustained damage at range, usually physical damage. They are very fragile with low mobility.*
+
+![](https://static.wikia.nocookie.net/leagueoflegends/images/5/58/Controller_icon.png/revision/latest/scale-to-width-down/96?cb=20181117143552) __Controller__
+
+>*Controllers assist their allies with utility and keep enemies away with crowd control. They excel when with their team.*
+
+![](https://static.wikia.nocookie.net/leagueoflegends/images/5/5a/Tank_icon.png/revision/latest/scale-to-width-down/96?cb=20181117143558) __Tank__
+
+>*Tanks are tough short-range champions who sacrifice damage in exchange for powerful crowd control.* 
+
+
+![](https://static.wikia.nocookie.net/leagueoflegends/images/6/67/Specialist_icon.png/revision/latest/scale-to-width-down/96?cb=20181117143619) __Specialist__
+
+>*Specialists are a diverse group of champions who do not fit the more obvious archetypes of the other classes.*
+
+
+$~$
+
+In the context of the game, some key vocabulary above further explained:
+
+* Damage – Champions are mostly capable of dealing two types of damage:
+    + Physical damage – a damage type thematically associated with making physical contact (i.e., swords).
+    
+    + Magic damage – Associated thematically with non-physical contact via spells.
+    
+* Spells – Spells refer to abilities that a player can activate on a champion with a variety of effects. Spells can do damage to enemies or aid allies.
+
+* Mobility – This refers to a champions ability to rapidly change their location.
+
+* Crowd Control - This refers to a champions ability to remove or decrease the control a targeted unit has over itself. For example, stopping champions from moving.
+
+$~$
+
+## 1.2 Goal and Motivation 
+The goal of this project is to use data about each champion to correctly classify them into their corresponding class. This will be achieved using cluster analysis. Cluster analysis was chosen as it is a powerful statistical method for identifying discrete groups.
+
+The benefits of this include validating the current classification system. If we are unable to validate the current system, it may suggest a new method of classifying the classes would be required.
+
+Additionally, for games of this genre distinct classes/archetypes aid in balancing the game in terms of a champions clear strengths and weaknesses. It can guide champion development and ensure the game is enjoyable. Characters need a clear “structure” and position within the game whilst not forcing players into specific playstyles.  
+
+However, as more characters are continually released character diversity, in theory, is going to decrease and it may become harder to distinguish the characters and the classes Projects such as this have value to the creators of the game as it will help them identify whether the current classification system is effective and what might be changed going forwards to maximise user experiences. 
+
+$~$
+
+## 1.3 The Data and The Method
+### 1.3.1 The Data
+This project was split into two parts, cluster analysis 1, which uses basic champion statistics to conduct cluster analysis. This clustering was then diagnosed to identify areas for potential improvement and explore underlying trends of the data. The second part of the project, cluster analysis 2, attempts to improve cluster analysis 1 by adding new variables to the existing data from in game statistics from professional League of Legends matches from 2021-22. 
+
+To achieve this, 4 different data sets are used, encompassing over 150,000 data points, which will be transformed and manipulated. Detailed explanations regarding obtaining these data sets and exploratory data analysis of the data will be carried out in the relevant sections [analysis 1](#Data1) and [analysis 2](#Data2).
+
+$~$
+
+### 1.3.2 The Method 
+The clustering technique chosen for this project was K-Means as the number of clusters is fixed, 7, whereas hierarchical techniques are used for unknown number of classes.
+
+To label the generated clusters with one of the above classes to calculate accuracies, a method needs to be defined. In general, cluster labelling is a subjective process, however, within this analysis objective labelling was attempted. To objectively identify which cluster is closest to the actual groups a distance matrix is calculated for all the clusters and all the groups. For each cluster, the group with the smallest distance is chosen as the most similar. Cases wherein two clusters share similar distances to the same group, the individual variables will be subjectively reviewed. 
+
+An example of one such distance matrix is seen below in **Table 1**, with green cells indicating the matching class for the cluster based on the distances. So 'Cluster 1' would be labelled 'Fighter'
+
+```{r example distance matrix}
+example_distance_prep <- round(example_distance, digits = 3)
+
+min_value <- apply(example_distance_prep,2, min)
+
+dt_matrix <- datatable(example_distance_prep, class = 'cell-border stripe',
+          caption = 'Table 1: Example of distance matrix used',
+           options = list(dom = 't')) %>%
+  formatStyle(
+    names(example_distance_prep),
+    backgroundColor =styleEqual(min_value, c("lightgreen")))
+
+dt_matrix
+
+```
+
+## 1.3 Notes
+- All the code will be hidden, if you wish to display all the code you can click the "code" button at the top right corner of this document. Individual code chunks can also be revealed by clicking the "code" buttons that appear on the right-hand side of the document in the relevant sections.
+
+
+
+$~$
+
+# 2. Cluster Analysis 1 - Base Stats Analysis
+
+## 2.1 Data {#Data1}
+
+### 2.1.1 Champion Base Stats
+Base Stats refer to a variety of in-game statistics for each champion, for example, how fast the champion can move. This data comes from the official riot API data library [Data Dragon](https://ddragon.leagueoflegends.com/cdn/12.8.1/data/en_US/champion.json). This data comes in the form of a JSON file and thus must be read and transformed, the code is provided.
+
+```{r champion base JSON, eval=FALSE, echo=TRUE}
+
+json_data <- jsonlite::fromJSON("https://ddragon.leagueoflegends.com/cdn/12.8.1/data/en_US/champion.json")
+
+data <- json_data$data
+
+data <- tibble(champion = data) %>%
+  unnest_wider(champion) %>%
+  unnest_wider(info) %>%
+  unnest_wider(tags) %>%
+  unnest_wider(stats) %>%
+  select(-image)
+
+```
+
+$~$
+
+This data contains `r dim(base_data)[2]` columns which contain both metadata and stats about the champions.
+```{r select champion data}
+
+champion_data <- base_data %>%
+  select(name, attack, magic, defense, attackrange)
+  
+```
+
+The variables selected from this data were:
+
+- attack - Champions physical damage
+
+- magic - Champions magic damage
+
+- defence - Champions ability to survive damage
+
+- attack range - the range in which a champion can deal damage
+
+
+These variables were chosen as they could be considered representative of the other variables. An example of this can be seen in the correlation plot below, displaying the correlation between the defence variable, and the other variables related to the defensive capabilities of a champion. There is relatively high correlation and thus including these other variables will not add any more useful information.
+
+$~$
+
+```{r defence corrplot,fig.asp=0.9, fig.width=10, fig.align='center'}
+defense <- base_data %>%
+  select(defense, armor, hp, spellblock, hpregen)
+
+corr <- cor(defense)
+corrplot(corr, method = "color", addgrid.col = "darkgray", bg="lightgrey", addCoef.col = 'white', tl.col = 'black',
+         cl.ratio = 0.5, cl.pos = 'n', number.cex = 1.5, tl.cex = 1.2)
+
+```
+
+
+```{r champion base cleaning}
+
+champion_data$attack[champion_data$name == "Lillia"] <-1
+
+missing <- champion_data %>%
+  filter(attack == 0)
+
+missing_names <- missing$name
+
+champion_data <-  champion_data %>%
+  filter(!name %in% missing_names)
+
+
+
+```
+
+
+$~$
+
+The following champions had values of 0 for attack, magic, and defense. This is an issue within the data source and thus will be removed. Additionally, the champion "Lillia" had a value of 0 for attack, this was replaced with 1 as champions cannot have attack values of 0.
+
+```{r missing names}
+
+missing_dt <- datatable(missing, options = list(dom = 't'))
+
+missing_dt
+
+
+```
+
+$~$
+
+Removing these champions decreases the total champions to `r dim(champion_data)[1]`. No other transformations were necessary, the complete table can be seen below in **Table 2**.
+
+```{r table 2}
+base_dt <- datatable(champion_data, caption = 'Table 2: Champion Base Stats',  options = list(dom = 'tp'))
+base_dt
+```
+
+
+### 2.1.2 Champion Client Ratings
+Within the game you can find detailed overviews of each champion along with ratings of the champions for 5 key areas. This data was obtained from [leagueoflegends.wikia.com](http://leagueoflegends.wikia.com/wiki/List_of_champions/Ratings) using web scraping. The code used to do this can be found below.
+
+```{r champion client scrape, eval=FALSE, echo=TRUE}
+
+page <- read_html("https://leagueoflegends.fandom.com/wiki/List_of_champions/Ratings")
+
+ratings <- page %>%
+  html_nodes(xpath = '//table') %>%
+  html_table()
+
+ratings_df <- as.data.frame(ratings[3])
+
+view(ratings_df)
+
+ratings_df <- ratings_df %>%
+  rename(
+    damage = Var.4,
+    toughness  = Var.5,
+    control = Var.6,
+    mobility = Var.7,
+    utility = Var.8
+  ) %>%
+  select(Champion, Primary, damage, toughness, control, mobility, utility)
+
+
+write.csv(ratings_df, "ratings_df.csv", row.names = F)
+```
+
+$~$
+
+This dataset provides 5 key ratings on a scale of 1 to 3 for each champion. These ratings are:
+
+* Damage - Ability to deal damage
+*	Toughness - Ability to survive damage
+* Control - Ability to disable enemies
+*	Mobility - Ability to move quickly, blink or dash
+* Utility - Ability to grant beneficial effects on allies.
+
+No transformations were required for this data. The raw data table can be found below in Table 3.
+
+```{r champion ratings table}
+
+cr_dt <- datatable(ratings, caption = 'Table 3: Champion Client Ratings', options = list(dom = 'tp'))
+cr_dt
+```
+
+$~$
+
+### 2.1.3 Data Exploration
+
+The two data sets are combined along with data for the 7 roles for each champion.
+```{r join base and rating}
+champion_ratings_join <- inner_join(champion_data, ratings, by = c("name" = "Champion")) %>%
+  inner_join(class, by = c("name" = "Champion")) %>%
+  select(-subclass)
+```
+
+The distribution of the classes shows that Fighters and Mages make up the largest proportions of the classes within the data. Specialists are the smallest class.
+
+
+```{r distribution of classses}
+
+class_table <- table(champion_ratings_join$class)
+class_table_round <- data.frame(round(prop.table(class_table), 3) * 100) %>%
+  rename(Class = Var1,
+         Percentage = Freq) %>%
+  arrange(desc(Percentage))
+
+
+class_dt <- datatable(class_table_round, class = 'cell-border stripe',
+           options = list(dom = 't'), rownames = FALSE)
+
+class_dt
+
+```
+
+<br>
+<br>
+
+Grouping the data by the class (**Figure 1**), we can observe the patterns identified in the class descriptions. We see that Tanks have the highest defense, Mages have the highest magic and Marksman have the highest attack value.
+
+```{r EDA base rating, message=FALSE, warning=FALSE, fig.align='center', fig.asp=1, fig.width=12}
+
+grouped_summary <- champion_ratings_join %>%
+  select(-name) %>%
+  group_by(class) %>%
+  summarise_all(mean)
+
+
+grouped_plot_data <- grouped_summary %>%
+  select(class, attack, magic, defense) 
+
+pivot_data <- pivot_longer(grouped_plot_data, attack:defense, names_to = "data")
+
+plot_data <- pivot_data %>%
+  arrange(class, desc(value)) %>%
+  mutate(highlight = ifelse((class == "Controller" & data == "magic") | (class == "Fighter" & data == "attack")
+                            | (class == "Mage" & data == "magic") | (class == "Marksman" & data == "attack")
+                            | (class == "Slayer" & data == "attack") | (class == "Specialist" & data == "magic")|
+                              (class == "Tank" & data == "defense"), "yes", "no"))
+
+
+ggplot(plot_data, aes (x= class,  y = value, fill = data, group = reorder(value, data), alpha = factor(highlight))) + 
+  geom_col(position = position_dodge(0.7), width = 0.5, color="black") + 
+  scale_alpha_manual(values = c("yes"=1, "no"=0.3), guide='none') +
+  theme_minimal() +
+  labs(y="", fill = "", 
+       subtitle = "The highest value for each class has been highlighted. Additionally, the bars are ordered within each class") + 
+  ggtitle("Figure 1: Base Statistics by Class") +
+  theme(legend.position = "bottom",
+        legend.key.size = unit(1, "cm"))
+
+
+```
+
+
+$~$
+
+Visualising the attack range and defense of champions, we begin to see some clear groups forming. We can see champions with higher defense typically show lower attack ranges. Whereas champions with lower defense show higher attack ranges. 
+
+```{r attack range density, fig.align='center'}
+
+ggplot(champion_ratings_join) +
+  geom_density(aes(x=attackrange), stat = "density") +
+  geom_point(aes(x=attackrange, y=defense/3000, color = class, size = 2)) +
+  scale_size(guide = "none") +
+  labs(y = "defense", title = "Figure 2: Attack Range vs Defense")  +
+  theme_classic() +
+  theme(axis.text.y = element_blank(),
+        legend.key.height = unit(1, "cm")) + 
+  guides(color = guide_legend(override.aes = list(size = 5)))
+
+
+```
+
+<br>
+<br>
+
+The summary table displaying the mean value for each class can be found below **Table 4**. 
+```{r eda base rating table}
+
+grouped_summary_table <- round(grouped_summary[,-1], 2)
+
+grouped_summary_table$class <- grouped_summary$class
+
+grouped_summary_table <- grouped_summary_table %>%
+  relocate(class, .before = "attack")
+
+datatable(grouped_summary_table, rownames = FALSE, class = 'cell-border stripe',
+           options = list(dom = 't'), caption = 'Table 4: Summary by class')
+
+```
+
+<br>
+<br>
+
+## 2.2 Clustering Champions
+
+For clustering the data must be scaled. Next the grouped summaries for each class are calculated and scaled. This allows for identifying cluster-class similarities as outlined in the method.
+
+Within the clustering technique, 7 clusters will be created for the 7 classes identified in the introduction.
+
+```{r Cluster Analysis data scaling}
+data_cluster_prep <- champion_ratings_join %>%
+  select(-c(name, class))
+
+rownames(data_cluster_prep) <- champion_ratings_join$name
+
+data_cluster_norm <- scale(data_cluster_prep)
+
+
+avgs <- champion_ratings_join %>%
+  select(-name) %>%
+  group_by(class) %>%
+  summarise_all(mean) %>%
+  ungroup()
+
+avgs <- as_tibble(avgs)
+
+avgs <- column_to_rownames(avgs, "class")
+
+avgs_scale <- scale(avgs)
+
+```
+
+### 2.2.1 K Means Output
+
+The cluster plot shows significant overlap between the clusters. The table shows that for Fighters, Mages, and Marksman the degree of similarity between the cluster and the class was high.
+
+```{r kmeans code}
+kmean_legacy <- pam(data_cluster_norm, k = 7)
+
+
+# characterising clusters
+distance_kmean <- rdist(avgs_scale, kmean_legacy$medoids)
+
+# comparing clusters to actual group (for the 6)
+# rename clusters
+
+kmean_df <- as.data.frame(kmean_legacy$clustering)
+
+kmean_df_mutate <- kmean_df %>%
+  mutate(role_kmeans = case_when(
+    kmean_legacy$clustering == 1 ~ "Fighter",
+    kmean_legacy$clustering == 2 ~ "Mage",
+    kmean_legacy$clustering == 3 ~ "Specialist",
+    kmean_legacy$clustering == 4 ~ "Tank",
+    kmean_legacy$clustering == 5 ~ "Marksman",
+    kmean_legacy$clustering == 6 ~ "Controller",
+    kmean_legacy$clustering == 7 ~ "Slayer"
+  ),
+  similarity = case_when(
+    kmean_legacy$clustering == 1 ~ "High",
+    kmean_legacy$clustering == 2 ~ "High",
+    kmean_legacy$clustering == 3 ~ "Low",
+    kmean_legacy$clustering == 4 ~ "Medium",
+    kmean_legacy$clustering == 5 ~ "High",
+    kmean_legacy$clustering == 6 ~ "Medium",
+    kmean_legacy$clustering == 7 ~ "Medium"))
+
+kmean_df_mutate_select <- kmean_df_mutate %>%
+  select(-c(`kmean_legacy$clustering`, similarity))
+
+
+# adding champion names has not worked at all
+
+kmean_df_mutate_select$name <- rownames(kmean_df_mutate_select)
+
+
+kmean_df_join <- inner_join(champion_ratings_join, kmean_df_mutate_select, by = "name")
+
+```
+
+
+```{r, k means plot, fig.align='center', fig.asp=0.9, fig.width=12}
+fviz_cluster(kmean_legacy, data = data_cluster_norm, repel = TRUE, axes = c(1,2))
+```
+
+```{r kmean table}
+table_kmean <- kmean_df_mutate %>%
+  rename(Cluster = `kmean_legacy$clustering`) %>%
+  group_by(Cluster) %>%
+  summarise(`Similar Class` = role_kmeans,
+            `Level of Similarity` = similarity) %>%
+  slice(1)
+
+datatable(table_kmean, class = 'cell-border stripe',
+           options = list(dom = 't'), rownames = FALSE)
+```
+
+$~$
+
+### 2.2.2 Cluster Results
+The overall accuracy of the K-Means clustering was 71%. Breaking this accuracy down by class, we see that we could not identify the Specialist class. This is not a surprising result, as the specialist class is very similar to all the classes. Additionally, the K-Means struggled to classify the Slayer class. 
+
+For the rest of the classes its clear we were able to identify them with high accuracy and may suggest these classes are well defined. 
+
+```{r overall accuracy}
+roles_select <- champion_ratings_join %>%
+  select(name, class)
+
+
+role_join <- inner_join(roles_select, kmean_df_mutate_select, by = "name")
+
+accuracy <- role_join %>%
+  pivot_longer(role_kmeans, names_to = "method")
+
+overall_accuracy <- accuracy %>%
+  group_by(method) %>%
+  summarise(accuracy = sum(value == class) / n())
+
+overall_accuracy$accuracy <- round(overall_accuracy$accuracy, 3)
+
+
+datatable(overall_accuracy,rownames = FALSE, class = 'cell-border stripe',
+           options = list(dom = 't'))
+```
+
+```{r method accuracy 1}
+
+accuracy_calc <- accuracy %>%
+  group_by(class, method) %>%
+  summarise(accuracy = (sum(value == class) / n()) * 100,
+            correct = sum(value == class),
+            n = n()) %>%
+  arrange(desc(accuracy)) %>%
+  select(-method)
+
+accuracy_calc$accuracy <- round(accuracy_calc$accuracy, 3)
+
+datatable(accuracy_calc,rownames = FALSE, class = 'cell-border stripe',
+           options = list(dom = 't'))
+
+```
+
+<br>
+<br>
+
+### 2.2.3 Cluster-Class Comparisons
+
+The plot below displays the cluster class comparisons for all scaled variables within the analysis. As the data is scaled, negative values indicate lower values, and positive values represent higher values relative for the respective variable.
+
+This plot serves multiple functions. First it allows a quick visual assessment of the similarity of the clusters to the assigned class. Secondly, it reveals information about the clusters that would otherwise be difficult to interpret. For example, the second plot, which displays only the Slayer and Specialist class, identifies the real Slayer class as having high mobility. The created cluster has a small mobility. Whereas The Specialist class has low mobility, but the created cluster has extremely high mobility. That would suggest that the high mobility Slayers have been placed within the Specialist cluster. Which in turn may indicate that the Slayer class is being sub divided into two separate Slayers, one with high mobility, and one with low mobility.
+
+```{r preparing the cluster plots, fig.align='center', fig.asp=0.9, fig.width=12}
+clust_role_df <- kmean_df_mutate %>%
+  group_by(role_kmeans) %>%
+  summarise(clust = `kmean_legacy$clustering`) %>%
+  slice(1)
+
+
+# mediods
+mediods <- data.frame(kmean_legacy$medoids, row.names = NULL)
+
+mediods$clust <- as.numeric(rownames(mediods))
+
+mediods_join <- inner_join(mediods, clust_role_df, by = "clust") %>%
+  select(-clust) %>%
+  rename(class = role_kmeans)
+
+# avgs 
+avg_df <- data.frame(avgs_scale)
+avg_df$class <- rownames(avg_df)
+
+pm <- pivot_longer(mediods_join, attack:utility, names_to = "variables", values_to = "cluster_value")
+
+pa <- pivot_longer(avg_df, attack:utility, names_to = "variables", values_to = "real_value")
+
+pm_j_pa <- inner_join(pm, pa, by = c("class", "variables"))
+final_pivot <- pivot_longer(pm_j_pa, cluster_value:real_value, names_to = "values")
+
+ggplot(final_pivot, aes(x = variables, y = value , fill = values)) + 
+  geom_col(position = position_dodge(0.7)) + 
+  coord_flip() +
+  facet_wrap(~class)
+
+
+```
+
+```{r fighter specialist plot, fig.align='center'}
+
+plot_fs_data <- final_pivot %>%
+  filter(class == "Slayer" | class == "Specialist") %>%
+  filter(variables == "mobility")
+
+ggplot(plot_fs_data, aes(x = variables, y = value , fill = values)) + 
+  geom_col(position = position_dodge(0.7)) + 
+  facet_wrap(~class)
+
+```
+
+
+<br>
+<br>
+
+
+## 2.3 Clustering Diagnostics
+### 2.3.1 silhouette score
+We can further explore the issues with the clustering, and the underlying information present in the data by calculating the silhouette per champion. the silhouette value indicates how well an observation was assigned to a cluster. if the value is near 1, it means the observation is well assigned. If the value is near -1 the observation is wrongly assigned. Values near 0 indicated that the observation is near the assigned cluster, but the observation is also very close to a neighbouring cluster.
+
+Identifying observations with values close to 0, we can identify roles the algorithm struggled to differentiate the most. From this analysis the Fighter and Slayer class appeared to be the most difficult to separate. This may indicate that more variables are required to better identify these classes from another.
+
+```{r silhouttes legacy }
+# exploring the silhoutte for each champion
+
+pam_df <- as.data.frame(kmean_legacy$silinfo$widths)
+
+pam_df$name <- rownames(pam_df)
+
+joined <- inner_join(pam_df, roles_select, by = "name")
+
+joined <- joined %>%
+  arrange(name)
+
+# renaming clusters
+# 1 = fighter
+joined[joined == 1] <- "Fighter"
+
+# 2 = Mage
+joined[joined == 2] <- "Mage"
+
+# 3 = assassin
+joined[joined == 3] <- "Specialist"
+
+# 4 = tank
+joined[joined == 4] <- "Tank"
+
+# 5= support
+joined[joined == 5] <- "Marksman"
+
+# 6 = marksman
+joined[joined == 6] <- "Controller"
+
+joined[joined == 7] <- "Slayer"
+
+joined_g <- joined %>%
+  group_by(class) %>%
+  mutate(count_all = n()) %>%
+  ungroup()
+
+problem_clust <- joined_g %>%
+  filter(sil_width < 0.15 & sil_width > -0.15)
+
+problem_by_class <- problem_clust %>%
+  group_by(class) %>%
+  summarise(count = n(),
+         per = count / count_all) %>%
+  slice(1)
+
+
+cluster_neighbour <- problem_clust %>%
+  group_by(cluster, neighbor) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+datatable(cluster_neighbour, options = list(dom = 'tp'))
+```
+
+$~$
+
+### 2.3.2 Principal Component Analysis (PCA)
+We can further explore underlying trends within the data using a principal component analysis (PCA) of the data. Although typically a dimension reduction technique, it can also be used during an exploratory data analysis to identify underlying patterns. This is because PCA metrics allow the identification of variables that capture the largest amount of variance.
+
+From the scree plot of explained variance most of the variance is captured within the first two principal components.
+
+```{r PCA analysis prep}
+
+pca_prep <- champion_ratings_join %>%
+  select(-c(name, class))
+
+rownames(pca_prep) <- champion_ratings_join$name
+
+legacy_pca <- PCA(pca_prep, scale.unit = TRUE, graph = FALSE)
+
+fviz_eig(legacy_pca, addlabels = TRUE, ylim = c(0,40))
+```
+
+
+Exploring the quality of representation for each variable within these components (dimensions), we can see most variables are well represented except for control, mobility, and utility. 
+
+```{r quality of representation}
+## quality of representation
+fviz_cos2(legacy_pca, choice = "var", axes = 1:2)
+
+```
+
+
+<br>
+<br>
+
+
+This may provide clear indications as to why the Fighter and Slayer were harder to separate, as, in the class summary table below, the main difference between fighter and slayer was mobility.
+
+```{r grouped summary pca}
+
+fighter_slayer <- grouped_summary_table %>%
+  filter(class == "Fighter" | class == "Slayer")
+
+datatable(fighter_slayer, rownames = FALSE, class = 'cell-border stripe',
+           options = list(dom = 't'))
+```
+
+
+<br>
+<br>
+
+
+Visualising the contributions to the individual principal components we can begin to see how the data is being partitioned.
+Dimension 1 mostly consists of defence and damage. Dimension 2 consists of magic and physical and to a lesser extent, range. This shows that the data is mostly being grouped by a character’s defence traits, and then whether the character has magic or physical damage. These are the most influential variables.
+
+```{r contribution to pc1}
+# Contributions of variables to PC1
+fviz_contrib(legacy_pca, choice = "var", axes = 1, top = 10)
+```
+
+```{r contribution to pc2}
+# Contributions of variables to PC2
+fviz_contrib(legacy_pca, choice = "var", axes = 2, top = 10)
+```
+
+$~$
+
+# 3. Cluster Analysis 2 - Base Stats and Pro Game Statistics
+
+The objective of Analysis 2 is to build on analysis 1 using information from the PCA to guide the selection of variables from professional games. These variables measure a variety of in game performance metrics for the champion played.
+
+## 3.1 Data {#Data2}
+
+### 3.1.1 Oracle Elixir Data
+For the professional game data, two datasets are used. The first comes from an independent professional League of Legends data website, [Oracle Elixir](https://oracleselixir.com/).
+
+The data provided contains almost all the professional games played for the desired year, broken down at a team and individual level. There are many columns pertaining to the performance of each champion within the played game. For this analysis games from 2021 and 2022 will be combined. The combined data contains 210,264 data points and 123 columns. 
+
+Due to the large number of variables, in-game knowledge was used to select potential variables to be included. These variables and a brief description are as follows:
+
+```{r variable desc oe}
+
+datatable(variable_desc, options = list(dom = 't',pageLength = 11, columnDefs = list(list(className = 'dt-center', targets = 2))))
+
+```
+
+$~$
+
+
+```{r preparing oe}
+# filter data for selection
+data_2021_select_oe <- data_2021_oe %>%
+  filter(position != "Team")
+
+
+data_2022_select_oe <- data_2022_oe %>%
+  filter(position != "Team")
+
+# combine these
+data_oe_c <- bind_rows(data_2021_select_oe, data_2022_select_oe)
+
+# missing values
+data_oe_c <- bind_rows(data_2021_select_oe, data_2022_select_oe) %>%
+  select(champion, kills, deaths, assists, dpm, damagetakenperminute, damagemitigatedperminute, wardskilled, wardsplaced,
+         killsat10, deathsat10)
+
+missing <- sum(is.na(data_oe_c))
+
+data_oe_c <- data_oe_c %>%
+  drop_na()
+
+
+```
+
+
+After selecting these variables, the missing data present was `r missing`. These rows were removed from the data. The data is then grouped by champion to obtain average values for all champions. plotting these variables, grouped by class, we can then select what may be useful for improving analysis 1. Using the plot and table, we can see that the key variables differentiating Fighter and Slayer are 'damagemitigatedperminute' and 'killsat10'. These variables will be selected. 
+
+```{r oe ggplot, fig.align = 'center', fig.asp=0.8, fig.width=17}
+data_group <- data_oe_c %>%
+  group_by(champion) %>%
+  filter(!is.na(champion)) %>%
+  summarise_all(mean)
+
+oe_exploration <- inner_join(data_group, class, by = c("champion" = "Champion"))%>%
+  select(-subclass)
+
+oe_long <- pivot_longer(oe_exploration, kills:deathsat10, names_to = "variable") 
+
+ggplot(oe_long, aes(x = class, y = value, color = class)) +
+  geom_boxplot() +
+  facet_wrap(~variable, scales = "free")
+
+```
+
+
+<br>
+<br>
+
+
+A summary table of the above plot.
+```{r oe exp table}
+oe_table <- oe_exploration %>%
+  select(-champion) %>%
+  group_by(class) %>%
+    summarise_all(mean)
+
+oe_table[,2:10] <- round(oe_table[,2:10], 2)
+
+datatable(oe_table, options = list(dom = 'tp'))
+
+```
+
+
+```{r OE data select}
+
+data_group <- data_group %>%
+  select(champion,damagemitigatedperminute, killsat10)
+
+```
+
+$~$
+
+
+### 3.1.2 Custom Data
+The second data set is a custom data set obtained using a combination of web scraping and API calls to the League of Legends fandom website, which currently acts as an unofficial data source for the depreciated match history. The method used to obtain this data can be found below.
+
+```{r custom data web scrape, eval=FALSE, echo=TRUE}
+
+# obtain the page links
+base_page <- read_html("https://lol.fandom.com/wiki/2022_Season")
+
+
+page_links <- base_page %>%
+  html_nodes(xpath = '//td[text() = "Domestic"]//following-sibling::td//li/a|//td[text() = "International"]//following-sibling::td//li/a') %>%
+  html_attr("href")
+
+
+page_links_df <- as.data.frame(page_links)
+
+page_links_df_filtered <- page_links_df %>%
+  filter(str_detect(page_links, "Spring_|Split_1|Winter_"))
+
+page_links_df_filtered
+
+
+# define empty df
+match_title_df <- data.frame(match_title = character())
+
+
+
+# scrape the match title for each link
+
+
+
+for(link in page_links_df_filtered$page_links){
+  
+  paste_link <- paste0("https://lol.fandom.com",link)
+  
+  current_page <- read_html(paste_link)
+  
+  match_title <- current_page %>%
+    html_nodes(xpath = '//table[@id = "md-table"]//a[@title and text() = "Link"]') %>%
+    html_attr("title")
+  
+  match_title <- data.frame(match_title)
+  
+  match_title_df <- bind_rows(match_title_df, match_title)
+  
+  Sys.sleep(5)
+  
+  
+}
+
+view(match_title_df)
+
+
+# check for V4
+
+sum(str_detect(match_title_df$match_title, "V4"))
+
+# we have 44 games out of 1216 which contain V4. remove these
+
+match_title_df_filtered <- match_title_df %>%
+  filter(!str_detect(match_title,"V4"))
+
+view(match_title_df_filtered)
+
+# these match titles are actually the titles of the metadata pages, so metadata needs to be replaced with data
+match_title_df_filtered$match_title <- str_replace(match_title_df_filtered$match_title, "metadata", "data")
+
+view(match_title_df_filtered)
+
+# with these match titles we can access the api of the website to obtain the match data
+# from that match data we can extract the variables of interest
+
+
+
+# do the first match separtley to obtain a data frame for appending
+
+
+for(title in match_title_df_filtered[1,]){
+  
+  api_base_url <- "https://lol.fandom.com/api.php"
+  
+  query_param <- list(
+    action = "query",
+    format = "json",
+    prop = "revisions",
+    titles = title,
+    rvprop = "content",
+    rvslots = "main"
+  )
+  
+  match_api_data <- GET(api_base_url, query = query_param)
+  
+  api_content <- content(match_api_data)
+  
+  
+  api_unnest <- as_tibble(api_content) %>%
+    unnest_longer(query) %>%
+    unnest_wider(query) %>%
+    unnest_longer(revisions) %>%
+    unnest_wider(revisions) %>%
+    unnest_wider(slots) %>%
+    unnest_wider(main) %>%
+    unnest_longer(`*`)
+  
+  api_final <- fromJSON(api_unnest$`*`)
+  
+  
+  # now find the things we are interested in
+  participants <- api_final$participants
+  
+  
+  df_v5_features <- participants %>%
+    select(championName, kills, assists, damageSelfMitigated, doubleKills, killingSprees,
+           largestKillingSpree, largestMultiKill, magicDamageDealtToChampions, physicalDamageDealtToChampions,
+           totalDamageDealtToChampions, spell1Casts, spell2Casts, spell3Casts, spell4Casts,
+           timeCCingOthers, totalDamageTaken, totalDamageShieldedOnTeammates, totalHealsOnTeammates, totalTimeCCDealt, totalHeal)
+  
+  df_v5_features$match_title <- title
+  
+  
+  
+}
+
+view(df_v5_features)
+
+
+for(title in match_title_df_filtered[-1,]){
+  
+  api_base_url <- "https://lol.fandom.com/api.php"
+  
+  query_param <- list(
+    action = "query",
+    format = "json",
+    prop = "revisions",
+    titles = title,
+    rvprop = "content",
+    rvslots = "main"
+  )
+  
+  match_api_data <- GET(api_base_url, query = query_param)
+  
+  api_content <- content(match_api_data)
+  
+  
+  api_unnest <- as_tibble(api_content) %>%
+    unnest_longer(query) %>%
+    unnest_wider(query) %>%
+    unnest_longer(revisions) %>%
+    unnest_wider(revisions) %>%
+    unnest_wider(slots) %>%
+    unnest_wider(main) %>%
+    unnest_longer(`*`)
+  
+  api_final <- fromJSON(api_unnest$`*`)
+  
+  
+  # now find the things we are interested in
+  participants <- api_final$participants
+  
+  
+  temp_select <- participants %>%
+    select(championName, kills, assists, damageSelfMitigated, doubleKills, killingSprees,
+           largestKillingSpree, largestMultiKill, magicDamageDealtToChampions, physicalDamageDealtToChampions,
+           totalDamageDealtToChampions, spell1Casts, spell2Casts, spell3Casts, spell4Casts,
+           timeCCingOthers, totalDamageTaken, totalDamageShieldedOnTeammates, totalHealsOnTeammates, totalTimeCCDealt, totalHeal)
+  
+  
+  temp_select$match_title <- title
+  
+  
+  df_v5_features <- bind_rows(df_v5_features, temp_select)
+  
+  print(which(match_title_df_filtered$match_title == title))
+  
+  Sys.sleep(3)
+  
+  
+
+}
+
+
+# now save this
+setwd("~/r projs/LOL")
+
+write.csv(df_v5_features, "df_v5_features.csv", row.names = FALSE)
+
+```
+
+To briefly explain this, the links to the individual professional league pages are first scraped. These links are then iterated over to obtain the titles of all the played matches for all the leagues. These titles are then transformed and iterated over themselves. Each title is used in a GET call to access the relevant API. This returns a JSON file which is then processed and read into R.
+
+This web scrape resulted in 1172 games scraped, or 11720 data points and 21 columns.
+
+Once again, due to the large number of variables, in-game knowledge was used to select potential variables to be included. These variables and a brief description are as follows:
+
+```{r custom desc}
+
+datatable(custom_desc, options = list(dom = 't'))
+```
+$~$
+
+Plotting these variables grouped by class and using the table below, it may be reasonable to suggest the only variable to select from here should be killingSprees.
+
+```{r preparing custom, fig.align = 'center', fig.asp=0.8, fig.width=17}
+
+# missing values
+data_custom_select <- data_2022_e %>%
+  select(championName, killingSprees, spell4Casts, timeCCingOthers, totalDamageShieldedOnTeammates, totalHealsOnTeammates, totalHeal)
+
+
+data_group_custom <- data_custom_select %>%
+  group_by(championName) %>%
+  filter(!is.na(championName)) %>%
+  summarise_all(mean)
+
+custom_exploration <- inner_join(data_group_custom, class, by = c("championName" = "Champion"))%>%
+  select(-subclass)
+
+custom_long <- pivot_longer(custom_exploration, killingSprees:totalHeal, names_to = "variable") 
+
+ggplot(custom_long, aes(x = class, y = value, color = class)) +
+  geom_boxplot() +
+  facet_wrap(~variable, scales = "free")
+
+
+```
+
+
+```{r custom exp table}
+custom_table <- custom_exploration %>%
+  select(-championName) %>%
+  group_by(class) %>%
+    summarise_all(mean)
+
+custom_table[,2:7] <- round(custom_table[,2:7], 2)
+
+datatable(custom_table, options = list(dom = 't'))
+
+```
+
+```{r custom select}
+data_group_e <- data_group_custom %>%
+  select(championName, killingSprees)
+
+```
+
+
+$~$
+
+However, as can be seen in the boxplot, there are some outliers. These will be explored along with the number of games for each champion, as champions with low games may indicate true outliers and need to be dealt with. The only outlier identified can be seen below. This champion was Annie and using this information the number of games for Annie within this dataset can be found below, which is just 1 game. Because  of this Annie will be removed from this data.
+
+```{r outliers}
+# explore outliers
+
+grouped_outlier <- custom_exploration %>%
+  group_by(class)
+
+# outliers
+out <- boxplot.stats(grouped_outlier$killingSprees)$out
+
+
+row_out <- which(grouped_outlier$killingSprees %in% c(out))
+
+names <- grouped_outlier[row_out,]$championName
+
+outlier_table <- grouped_outlier[row_out,]
+
+datatable(outlier_table, options = list(dom = 't'))
+
+```
+
+
+```{r games played}
+games_champ <- data_2022_e %>%
+  group_by(championName) %>%
+  summarise(games  = n())
+
+
+games_filt <- games_champ %>%
+  filter(championName %in% names)
+
+datatable(games_filt, options = list(dom = 't'))
+
+```
+
+```{r remove annie}
+data_group_e <- data_group_e %>%
+  filter(!championName == "Annie")
+
+```
+
+$~$
+
+
+```{r join cluster 2}
+# join these
+champ_pro_join <- inner_join(data_group_e, data_group, by = c("championName" = "champion")) %>%
+  inner_join(champion_ratings_join, by = c("championName" = "name"))
+
+```
+
+Now the data can be joined with the oracle elixir data and the data from analysis 1. However, using the pro game statistics does reduce the number of champions included in the cluster analysis as not all champions are played or are viable in the competitive scene. Using these statistics reduces the champion count to 115 which may influence the clustering.
+
+## 3.2 Clustering Champions
+
+```{r Cluster Analaysis 2 Code data prep}
+
+### Real Data summaries
+avgs_2 <- champ_pro_join %>%
+  select(-championName) %>%
+  group_by(class) %>%
+  summarise_all(mean) %>%
+  ungroup()
+
+avgs_2 <- as_tibble(avgs_2)
+
+avgs_2 <- column_to_rownames(avgs_2, "class")
+
+avgs_scale_2 <- scale(avgs_2)
+
+
+### Agglomerative hierarchical clustering
+## preparing the data
+data_cluster_prep_2 <- champ_pro_join %>%
+  select(-c(championName, class))
+
+rownames(data_cluster_prep_2) <- champ_pro_join$championName
+
+data_cluster_norm_2 <- scale(data_cluster_prep_2)
+
+```
+
+
+### 3.2.1 K Means Output
+
+The cluster plot shows overlap once again between the clusters. One clear change, the table shows only medium and low similarity for all the clusters.
+
+```{r kmeans code 2}
+kmean_legacy_2 <- pam(data_cluster_norm_2, k = 7)
+
+
+# characterising clusters
+distance_kmean_2 <- rdist(avgs_scale_2, kmean_legacy_2$medoids)
+
+# comparing clusters to actual group (for the 6)
+# rename clusters
+
+kmean_df_2 <- as.data.frame(kmean_legacy_2$clustering)
+
+kmean_df_mutate_2 <- kmean_df_2 %>%
+  mutate(role_kmeans = case_when(
+    kmean_legacy_2$clustering == 1 ~ "Fighter",
+    kmean_legacy_2$clustering == 2 ~ "Mage",
+    kmean_legacy_2$clustering == 3 ~ "Slayer",
+    kmean_legacy_2$clustering == 4 ~ "Tank",
+    kmean_legacy_2$clustering == 5 ~ "Marksman",
+    kmean_legacy_2$clustering == 6 ~ "Controller",
+    kmean_legacy_2$clustering == 7 ~ "Specialist"
+  ),
+  similarity = case_when(
+    kmean_legacy_2$clustering == 1 ~ "Medium",
+    kmean_legacy_2$clustering == 2 ~ "Medium",
+    kmean_legacy_2$clustering == 3 ~ "Low",
+    kmean_legacy_2$clustering == 4 ~ "Medium",
+    kmean_legacy_2$clustering == 5 ~ "Medium",
+    kmean_legacy_2$clustering == 6 ~ "Medium",
+    kmean_legacy_2$clustering == 7 ~ "Low"))
+
+kmean_df_mutate_select_2 <- kmean_df_mutate_2 %>%
+  select(-c(`kmean_legacy_2$clustering`, similarity))
+
+
+# adding champion names has not worked at all
+
+kmean_df_mutate_select_2$name <- rownames(kmean_df_mutate_select_2)
+
+
+kmean_df_join_2 <- inner_join(champ_pro_join, kmean_df_mutate_select_2, by = c("championName" = "name"))
+
+```
+
+
+```{r, k means plot 2, fig.align='center', fig.asp=0.9, fig.width=12}
+fviz_cluster(kmean_legacy_2, data = data_cluster_norm_2, repel = TRUE, axes = c(1,2))
+```
+
+
+```{r kmean table 2}
+table_kmean_2 <- kmean_df_mutate_2 %>%
+  rename(Cluster = `kmean_legacy_2$clustering`) %>%
+  group_by(Cluster) %>%
+  summarise(Similar_class = role_kmeans,
+            Similarity = similarity) %>%
+  slice(1)
+
+datatable(table_kmean_2, options = list(dom = 't'))
+```
+
+
+
+### 3.2.2 Cluster Results
+The overall accuracy of the K-Means clustering for analysis 2 was 73%, this is a 2% increase compared to analysis 1.
+```{r overall accuracy 2}
+roles_select_2 <- champ_pro_join %>%
+  select(championName, class)
+
+
+role_join_2 <- inner_join(roles_select_2, kmean_df_mutate_select_2, by = c("championName" = "name"))
+
+accuracy_2 <- role_join_2 %>%
+  pivot_longer(role_kmeans, names_to = "method")
+
+overall_accuracy_2 <- accuracy_2 %>%
+  group_by(method) %>%
+  summarise(accuracy = sum(value == class) / n())
+
+overall_accuracy_2$Analysis_2 <- round(overall_accuracy_2$accuracy, 3)
+overall_accuracy_2$Analysis_1 <- overall_accuracy$accuracy
+
+overall_accuracy_2 <- overall_accuracy_2 %>%
+  select(Analysis_1, Analysis_2)
+
+datatable(overall_accuracy_2,rownames = FALSE, class = 'cell-border stripe',
+           options = list(dom = 't'))
+```
+
+$~$
+
+Breaking this accuracy down by class, we can see that the Marksman accuracy increased by over 10% with the new variables. Additionally, the primary goal of analysis 2, to increase accuracy of Slayers appears to have failed, as the accuracy did change. Interestingly the accuracy for Specialists increased.
+
+For the rest of the classes the values are relatively similar across analysis 1 and 2.
+
+```{r method accuracy 2}
+
+accuracy_calc_2 <- accuracy_2 %>%
+  group_by(class, method) %>%
+  summarise(accuracy = (sum(value == class) / n()) * 100,
+            correct = sum(value == class),
+            n = n()) %>%
+  arrange(desc(accuracy)) %>%
+  select(-method)
+
+acc_join <- inner_join(accuracy_calc_2, accuracy_calc, by = "class", suffix = c("_analysis_2", "_analysis_1"))
+
+acc_join <- acc_join %>%
+  select(class, accuracy_analysis_1, accuracy_analysis_2)
+
+acc_join$accuracy_analysis_2 <- round(acc_join$accuracy_analysis_2, 3)
+
+datatable(acc_join,rownames = FALSE, class = 'cell-border stripe',
+           options = list(dom = 't'))
+
+```
+
+$~$
+
+
+# 4 Discussion and further work
+
+## 4.1 Discussion
+In terms of comparisons between the two analyses, the inclusion of the in-game data did not increase the accuracy of the Slayer class, however it did lead to a significant increase in the Marksman class, suggesting the additional in game variables added were good representatives of the Marksman class, but not the Slayer class. The increase in overall accuracy within Analysis 2 may be in part due to the decrease in champions available to cluster. As can be seen below over 41 champions were removed due not being played at a professional level, meaning only 115 champions were included in Analysis 2 compared to 153 in Analysis 1, a 25% decease. 
+
+```{r champions lost}
+anti <- anti_join(champion_ratings_join, champ_pro_join, by = c("name" = "championName"))
+
+class <- data.frame(table(anti$class)) %>%
+  rename(Class = Var1,
+         Amount_Removed = Freq) %>%
+  arrange(desc(Amount_Removed))
+
+datatable(class, options = list(dom = 't'))
+
+
+```
+
+In terms of validating the current class system, using base statistics all classes except Slayer and Specialist achieved accuracies of over 79%, it would be reasonable to conclude that these classes are appropriate for the champions they are assigned to. The failure to correctly separate Slayers may be due to a failure in the data rather than the class itself, as there are significant similarities between the Slayer and the Fighter, the key variables separating them may be missing.
+
+It is clear, using the base statistics, it is not possible to identify the specialist class, achieving a 7% accuracy. This may suggest this class is unnecessary and the champions within can be placed into their  most similar classes. 
+
+
+
+## 4.2 Further Work
+To improve upon this study, the analysis 1 should be recalculated with the same champions selected as within analysis 2 to ensure more fair comparisons. Additionally, as the number of clusters desired is known, it would be reasonable to suggest carrying out a k-nearest neighbours (KNN) analysis.
+
+As a preliminary study, the findings here do identify some key areas for further work. Firstly, rather than using professional data, it would be better to use Riots API for non-professional games as all the champions would then be included, with larger sample sizes for more representative means.
+
+Further exploration into the Slayer class is needed to confirm whether this class is distinctive enough or not from the Fighter class. For example, using natural langue processing (NLP) on the champions abilities text, which gives detailed information regarding the spell would allow for new features to be created which may better differentiate the classes. More specifically, variables that capture the key representation of the Slayers, high mobility, and low time to kill.
+
+
