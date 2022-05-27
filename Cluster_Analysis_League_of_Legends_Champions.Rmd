@@ -1,41 +1,8 @@
 ---
 title: "Cluster Analysis League of Legends Champions"
-knit: (function(input_file, encoding) {
-  out_dir <- 'docs';
-  rmarkdown::render(input_file,
-    encoding=encoding,
-    output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
 author: "Billy Houseman"
 date: "27/05/2022"
-output: 
-  html_document:
-    code_folding: hide
-    toc: true
-    toc_float: true
-    theme: cerulean
----
-<style>
-blockquote {
-    padding: 10px 20px;
-    margin: 0 0 20px;
-    font-size: 13.5px;
-    border-left: 5px solid #eee;
-}
 
-body {
-text-align: justify;
-font-size: 14pt;
-}
-
-body .main-container {
-max-width: 3600px;
-}
-
-.html-widget {
-    margin: auto;
-}
-</style>
----
 
 
 
